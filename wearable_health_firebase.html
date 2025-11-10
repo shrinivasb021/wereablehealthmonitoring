@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wearable Health Monitoring — Cloud Connected</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{font-family:"Inter",sans-serif;background:linear-gradient(120deg,#0a1020,#101b3a);
+color:#e8efff;min-height:100vh;padding:40px 20px}
+.card{background:rgba(255,255,255,.05);padding:20px;border-radius:14px;margin:10px 0}
+.btn{background:linear-gradient(135deg,#4ade80,#22d3ee);border:none;color:#001b1b;
+font-weight:700;padding:12px 20px;border-radius:12px;cursor:pointer;margin-top:20px}
+.message{margin-top:10px;font-size:14px;color:#4ade80}
+</style>
+</head>
+<body>
+<h1>☁️ Wearable Health Monitoring — Cloud Enabled</h1>
+<p>Generate report → upload automatically to Firebase (Storage + Firestore).</p>
+
+<div class="card">
+  <p><strong>Heart Rate:</strong> <span id="hrVal">--</span> bpm</p>
+  <p><strong>SpO₂:</strong> <span id="spo2Val">--</span>%</p>
+  <p><strong>Temp:</strong> <span id="tempVal">--</span>°C</p>
+  <p><strong>BP:</strong> <span id="bpSys">--</span>/<span id="bpDia">--</span> mmHg</p>
+  <p id="messageBox">System initializing...</p>
+  <button class="btn" id="generateUpload">📤 Generate & Upload Report</button>
+  <div class="message" id="uploadMsg"></div>
+</div>
+
+<!-- Firebase + Chart + jsPDF + QR -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// ---------- 1. Firebase Config (REPLACE with yours) ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyEXAMPLE",
+  authDomain: "your-app.firebaseapp.com",
+  projectId: "your-app",
+  storageBucket: "your-app.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abc123"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+// ---------- 2. Simulate readings ----------
+function randomVitals(){
+  return {
+    hr: Math.round(60+Math.random()*60),
+    spo2: Math.round(95+Math.random()*5),
+    temp: (36+Math.random()*2).toFixed(1),
+    bpSys: Math.round(100+Math.random()*40),
+    bpDia: Math.round(60+Math.random()*25)
+  };
+}
+let history = [];
+function updateUI(){
+  const v=randomVitals();
+  document.getElementById("hrVal").textContent=v.hr;
+  document.getElementById("spo2Val").textContent=v.spo2;
+  document.getElementById("tempVal").textContent=v.temp;
+  document.getElementById("bpSys").textContent=v.bpSys;
+  document.getElementById("bpDia").textContent=v.bpDia;
+  document.getElementById("messageBox").textContent="💚 All vitals are stable.";
+  history.push(v);
+  if(history.length>10) history.shift();
+}
+setInterval(updateUI,2000);
+updateUI();
+
+// ---------- 3. Generate PDF + Upload ----------
+document.getElementById("generateUpload").addEventListener("click",async ()=>{
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const now=new Date();
+
+  const hr=document.getElementById("hrVal").textContent;
+  const spo2=document.getElementById("spo2Val").textContent;
+  const temp=document.getElementById("tempVal").textContent;
+  const bpSys=document.getElementById("bpSys").textContent;
+  const bpDia=document.getElementById("bpDia").textContent;
+  const summary=document.getElementById("messageBox").textContent;
+
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(16);
+  doc.text("📋 Cloud Health Report",20,25);
+  doc.setFontSize(12);
+  doc.text(`Generated: ${now.toLocaleString()}`,20,35);
+  doc.text(`HR: ${hr} bpm`,20,45);
+  doc.text(`SpO₂: ${spo2}%`,20,55);
+  doc.text(`Temp: ${temp}°C`,20,65);
+  doc.text(`BP: ${bpSys}/${bpDia} mmHg`,20,75);
+  doc.text(`Summary: ${summary}`,20,90);
+
+  // QR code
+  const qrDiv=document.createElement('div');
+  new QRCode(qrDiv,{text:`Health Report @ ${now}`,width:100,height:100});
+  const qrCanvas=qrDiv.querySelector('canvas');
+  const qrImg=qrCanvas.toDataURL('image/png');
+  doc.addImage(qrImg,'PNG',150,100,40,40);
+
+  // Chart image
+  const chartCanvas=document.createElement('canvas');
+  chartCanvas.width=400; chartCanvas.height=200;
+  const ctx=chartCanvas.getContext('2d');
+  new Chart(ctx,{
+    type:'line',
+    data:{
+      labels:history.map((_,i)=>`T-${(history.length-i)*2}s`),
+      datasets:[
+        {label:'HR',data:history.map(v=>v.hr),borderColor:'#60a5fa',fill:false},
+        {label:'SpO₂',data:history.map(v=>v.spo2),borderColor:'#34d399',fill:false},
+        {label:'Temp',data:history.map(v=>v.temp),borderColor:'#fbbf24',fill:false},
+        {label:'BP Sys',data:history.map(v=>v.bpSys),borderColor:'#f43f5e',fill:false},
+        {label:'BP Dia',data:history.map(v=>v.bpDia),borderColor:'#fb7185',fill:false}
+      ]
+    },
+    options:{animation:false}
+  });
+  await new Promise(r=>setTimeout(r,500));
+  doc.addImage(chartCanvas.toDataURL("image/png"),"PNG",20,110,120,60);
+
+  const pdfBlob=doc.output("blob");
+  const filename=`Report_${now.toISOString().replace(/[:.]/g,"-")}.pdf`;
+
+  // ---------- 4. Upload to Firebase ----------
+  const storageRef=storage.ref().child("reports/"+filename);
+  await storageRef.put(pdfBlob);
+  const url=await storageRef.getDownloadURL();
+
+  await db.collection("reports").add({
+    timestamp:now.toISOString(),
+    heartRate:parseInt(hr),
+    spo2:parseInt(spo2),
+    temperature:parseFloat(temp),
+    bpSys:parseInt(bpSys),
+    bpDia:parseInt(bpDia),
+    summary,
+    pdfUrl:url
+  });
+
+  document.getElementById("uploadMsg").textContent="✅ Report uploaded to Firebase successfully!";
+});
+</script>
+</body>
+</html>
